@@ -2,11 +2,15 @@
 
 namespace DTApi\Http\Controllers;
 
+use Exception;
 use DTApi\Models\Job;
-use DTApi\Http\Requests;
 use DTApi\Models\Distance;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Config;
 use DTApi\Repository\BookingRepository;
+use App\Http\Requests\Job\StoreJobEmailRequest;
+use App\Http\Requests\Booking\StoreBookingRequest;
+use App\Http\Requests\Booking\UpdateBookingRequest;
 
 /**
  * Class BookingController
@@ -18,7 +22,7 @@ class BookingController extends Controller
     /**
      * @var BookingRepository
      */
-    protected $repository;
+    protected $bookingRepository;
 
     /**
      * BookingController constructor.
@@ -26,7 +30,7 @@ class BookingController extends Controller
      */
     public function __construct(BookingRepository $bookingRepository)
     {
-        $this->repository = $bookingRepository;
+        $this->bookingRepository = $bookingRepository;
     }
 
     /**
@@ -35,17 +39,28 @@ class BookingController extends Controller
      */
     public function index(Request $request)
     {
-        if($user_id = $request->get('user_id')) {
-
-            $response = $this->repository->getUsersJobs($user_id);
-
-        }
-        elseif($request->__authenticatedUser->user_type == env('ADMIN_ROLE_ID') || $request->__authenticatedUser->user_type == env('SUPERADMIN_ROLE_ID'))
-        {
-            $response = $this->repository->getAll($request);
-        }
-
-        return response($response);
+	    try {
+		    $response = [];
+		    
+		    //Get role ids from constants file
+		    $roles = Config::get('constants.roles');
+		    $roleIds = array($roles['SUPER_ADMIN_ID'], $roles['ADMIN_ID']);
+		    
+		    if($userId = $request->get('user_id')) {
+			    //Get data from jobs table against specific user id
+			    $response = $this->bookingRepository->getUsersJobs($userId);
+		    }
+		    else if(in_array($request->authenticatedUser->user_type, $roleIds)) {
+			    //Get data from jobs table against user roles
+			    $response = $this->bookingRepository->getAll($request);
+		    }
+		    
+		    return response($response);
+	    }
+		catch(Exception $e) {
+			info("Exception occurred: ", [$e->getMessage()]);
+			return response('Some error occurred!');
+		}
     }
 
     /**
@@ -54,51 +69,77 @@ class BookingController extends Controller
      */
     public function show($id)
     {
-        $job = $this->repository->with('translatorJobRel.user')->find($id);
-
-        return response($job);
+		try {
+			//Get specific job data
+			$job = $this->bookingRepository->with(['translatorJobRel.user'])->find($id);
+			
+			return response($job);
+		}
+		catch(Exception $e) {
+			info("Exception occurred: ", [$e->getMessage()]);
+			return response('Some error occurred!');
+		}
     }
 
     /**
-     * @param Request $request
+     * @param StoreBookingRequest $request
      * @return mixed
      */
-    public function store(Request $request)
+    public function store(StoreBookingRequest $request)
     {
-        $data = $request->all();
-
-        $response = $this->repository->store($request->__authenticatedUser, $data);
-
-        return response($response);
-
+        try {
+	        $data = $request->all();
+	        //Store job data
+	        $response = $this->bookingRepository->store($request->authenticatedUser, $data);
+	        
+	        return response($response);
+        }
+        catch(Exception $e) {
+	        info("Exception occurred: ", [$e->getMessage()]);
+	        return response('Some error occurred!');
+        }
     }
 
     /**
      * @param $id
-     * @param Request $request
+     * @param UpdateBookingRequest $request
      * @return mixed
      */
-    public function update($id, Request $request)
+    public function update($id, UpdateBookingRequest $request)
     {
-        $data = $request->all();
-        $cuser = $request->__authenticatedUser;
-        $response = $this->repository->updateJob($id, array_except($data, ['_token', 'submit']), $cuser);
-
-        return response($response);
+	    try {
+		    //Get data from request except some columns
+		    $data = $request->except(['_token', 'submit']);
+		    $authenticatedUser = $request->authenticatedUser;
+		    
+		    //Update job data
+		    $response = $this->bookingRepository->updateJob($id, $data, $authenticatedUser);
+		    
+		    return response($response);
+	    }
+	    catch(Exception $e) {
+		    info("Exception occurred: ", [$e->getMessage()]);
+		    return response('Some error occurred!');
+	    }
     }
 
     /**
-     * @param Request $request
+     * @param StoreJobEmailRequest $request
      * @return mixed
      */
-    public function immediateJobEmail(Request $request)
+    public function immediateJobEmail(StoreJobEmailRequest $request)
     {
-        $adminSenderEmail = config('app.adminemail');
-        $data = $request->all();
-
-        $response = $this->repository->storeJobEmail($data);
-
-        return response($response);
+	    try {
+		    $data = $request->all();
+		    //Store job email in jobs table
+		    $response = $this->bookingRepository->storeJobEmail($data);
+		    
+		    return response($response);
+	    }
+	    catch(Exception $e) {
+		    info("Exception occurred: ", [$e->getMessage()]);
+		    return response('Some error occurred!');
+	    }
     }
 
     /**
@@ -107,13 +148,19 @@ class BookingController extends Controller
      */
     public function getHistory(Request $request)
     {
-        if($user_id = $request->get('user_id')) {
-
-            $response = $this->repository->getUsersJobsHistory($user_id, $request);
-            return response($response);
-        }
-
-        return null;
+		try {
+			if($userId = $request->get('user_id')) {
+				//Get user job history
+				$response = $this->bookingRepository->getUsersJobsHistory($userId, $request);
+				return response($response);
+			}
+			
+			return response(null);
+		}
+		catch(Exception $e) {
+			info("Exception occurred: ", [$e->getMessage()]);
+			return response('Some error occurred!');
+		}
     }
 
     /**
@@ -122,22 +169,34 @@ class BookingController extends Controller
      */
     public function acceptJob(Request $request)
     {
-        $data = $request->all();
-        $user = $request->__authenticatedUser;
-
-        $response = $this->repository->acceptJob($data, $user);
-
-        return response($response);
+		try {
+			$data = $request->all();
+			$authenticatedUser = $request->authenticatedUser;
+			
+			$response = $this->bookingRepository->acceptJob($data, $authenticatedUser);
+			
+			return response($response);
+		}
+		catch(Exception $e) {
+			info("Exception occurred: ", [$e->getMessage()]);
+			return response('Some error occurred!');
+		}
     }
 
     public function acceptJobWithId(Request $request)
     {
-        $data = $request->get('job_id');
-        $user = $request->__authenticatedUser;
-
-        $response = $this->repository->acceptJobWithId($data, $user);
-
-        return response($response);
+		try {
+			$data = $request->get('job_id');
+			$authenticatedUser = $request->authenticatedUser;
+			//Accept job with specific id
+			$response = $this->bookingRepository->acceptJobWithId($data, $authenticatedUser);
+			
+			return response($response);
+		}
+		catch(Exception $e) {
+			info("Exception occurred: ", [$e->getMessage()]);
+			return response('Some error occurred!');
+		}
     }
 
     /**
@@ -146,12 +205,18 @@ class BookingController extends Controller
      */
     public function cancelJob(Request $request)
     {
-        $data = $request->all();
-        $user = $request->__authenticatedUser;
-
-        $response = $this->repository->cancelJobAjax($data, $user);
-
-        return response($response);
+        try {
+	        $data = $request->all();
+	        $authenticatedUser = $request->authenticatedUser;
+	        
+	        $response = $this->bookingRepository->cancelJobAjax($data, $authenticatedUser);
+	        
+	        return response($response);
+        }
+        catch(Exception $e) {
+	        info("Exception occurred: ", [$e->getMessage()]);
+	        return response('Some error occurred!');
+        }
     }
 
     /**
@@ -160,22 +225,30 @@ class BookingController extends Controller
      */
     public function endJob(Request $request)
     {
-        $data = $request->all();
-
-        $response = $this->repository->endJob($data);
-
-        return response($response);
-
+		try {
+			$data = $request->all();
+			$response = $this->bookingRepository->endJob($data);
+			
+			return response($response);
+		}
+		catch(Exception $e) {
+			info("Exception occurred: ", [$e->getMessage()]);
+			return response('Some error occurred!');
+		}
     }
 
     public function customerNotCall(Request $request)
     {
-        $data = $request->all();
-
-        $response = $this->repository->customerNotCall($data);
-
-        return response($response);
-
+        try {
+	        $data = $request->all();
+	        $response = $this->bookingRepository->customerNotCall($data);
+	        
+	        return response($response);
+        }
+        catch(Exception $e) {
+	        info("Exception occurred: ", [$e->getMessage()]);
+	        return response('Some error occurred!');
+        }
     }
 
     /**
@@ -184,92 +257,79 @@ class BookingController extends Controller
      */
     public function getPotentialJobs(Request $request)
     {
-        $data = $request->all();
-        $user = $request->__authenticatedUser;
-
-        $response = $this->repository->getPotentialJobs($user);
-
-        return response($response);
+		try {
+			$authenticatedUser = $request->authenticatedUser;
+			$response = $this->bookingRepository->getPotentialJobs($authenticatedUser);
+			
+			return response($response);
+		}
+		catch(Exception $e) {
+			info("Exception occurred: ", [$e->getMessage()]);
+			return response('Some error occurred!');
+		}
     }
 
     public function distanceFeed(Request $request)
     {
-        $data = $request->all();
-
-        if (isset($data['distance']) && $data['distance'] != "") {
-            $distance = $data['distance'];
-        } else {
-            $distance = "";
-        }
-        if (isset($data['time']) && $data['time'] != "") {
-            $time = $data['time'];
-        } else {
-            $time = "";
-        }
-        if (isset($data['jobid']) && $data['jobid'] != "") {
-            $jobid = $data['jobid'];
-        }
-
-        if (isset($data['session_time']) && $data['session_time'] != "") {
-            $session = $data['session_time'];
-        } else {
-            $session = "";
-        }
-
-        if ($data['flagged'] == 'true') {
-            if($data['admincomment'] == '') return "Please, add comment";
-            $flagged = 'yes';
-        } else {
-            $flagged = 'no';
-        }
-        
-        if ($data['manually_handled'] == 'true') {
-            $manually_handled = 'yes';
-        } else {
-            $manually_handled = 'no';
-        }
-
-        if ($data['by_admin'] == 'true') {
-            $by_admin = 'yes';
-        } else {
-            $by_admin = 'no';
-        }
-
-        if (isset($data['admincomment']) && $data['admincomment'] != "") {
-            $admincomment = $data['admincomment'];
-        } else {
-            $admincomment = "";
-        }
-        if ($time || $distance) {
-
-            $affectedRows = Distance::where('job_id', '=', $jobid)->update(array('distance' => $distance, 'time' => $time));
-        }
-
-        if ($admincomment || $session || $flagged || $manually_handled || $by_admin) {
-
-            $affectedRows1 = Job::where('id', '=', $jobid)->update(array('admin_comments' => $admincomment, 'flagged' => $flagged, 'session_time' => $session, 'manually_handled' => $manually_handled, 'by_admin' => $by_admin));
-
-        }
-
-        return response('Record updated!');
+		try {
+			$data = $request->all();
+			//Assign request data to respective variables
+			$distance = (isset($data['distance']) && trim($data['distance']) != "") ? $data['distance'] : "";
+			$time = (isset($data['time']) && trim($data['time']) != "") ? $data['time'] : "";
+			$jobId = (isset($data['job_id']) && trim($data['job_id']) != "") ? $data['job_id'] : null;
+			$session = (isset($data['session_time']) && trim($data['session_time']) != "") ? $data['session_time'] : "";
+			$adminComment = (isset($data['admin_comment']) && trim($data['admin_comment']) != "") ? $data['admin_comment'] : "";
+			$flagged = $data['flagged'] == 'true' ? 'yes' : 'no';
+			$manuallyHandled = $data['manually_handled'] == 'true' ? 'yes' : 'no';
+			$byAdmin = $data['by_admin'] == 'true' ? 'yes' : 'no';
+			
+			if($time || $distance) {
+				$distanceAffectedRows = Distance::where('job_id', '=', $jobId)->update(array('distance' => $distance, 'time' => $time));
+			}
+			
+			if($adminComment || $session || $flagged || $manuallyHandled || $byAdmin) {
+				$jobAffectedRows = Job::where('id', '=', $jobId)->update(array('admin_comments' => $adminComment, 'flagged' => $flagged, 'session_time' => $session, 'manually_handled' => $manuallyHandled, 'by_admin' => $byAdmin));
+			}
+			
+			return response('Record updated!');
+		}
+		catch(Exception $e) {
+			info("Exception occurred: ", [$e->getMessage()]);
+			return response('Some error occurred!');
+		}
     }
 
     public function reopen(Request $request)
     {
-        $data = $request->all();
-        $response = $this->repository->reopen($data);
-
-        return response($response);
+		try {
+			$data = $request->all();
+			$response = $this->bookingRepository->reopen($data);
+			
+			return response($response);
+		}
+		catch(Exception $e) {
+			info("Exception occurred: ", [$e->getMessage()]);
+			return response('Some error occurred!');
+		}
     }
 
     public function resendNotifications(Request $request)
     {
-        $data = $request->all();
-        $job = $this->repository->find($data['jobid']);
-        $job_data = $this->repository->jobToData($job);
-        $this->repository->sendNotificationTranslator($job, $job_data, '*');
-
-        return response(['success' => 'Push sent']);
+		try {
+			$data = $request->all();
+			//Find job using id
+			$job = $this->bookingRepository->find($data['job_id']);
+			//Create job data
+			$jobData = $this->bookingRepository->jobToData($job);
+			//Send notification
+			$this->bookingRepository->sendNotificationTranslator($job, '*', $jobData);
+			
+			return response(['success' => 'Push sent']);
+		}
+		catch(Exception $e) {
+			info("Exception occurred: ", [$e->getMessage()]);
+			return response('Some error occurred!');
+		}
     }
 
     /**
@@ -279,15 +339,18 @@ class BookingController extends Controller
      */
     public function resendSMSNotifications(Request $request)
     {
-        $data = $request->all();
-        $job = $this->repository->find($data['jobid']);
-        $job_data = $this->repository->jobToData($job);
-
-        try {
-            $this->repository->sendSMSNotificationToTranslator($job);
+		try {
+			$data = $request->all();
+			//Find job using id
+			$job = $this->bookingRepository->find($data['job_id']);
+			//Send SMS notification
+            $this->bookingRepository->sendSMSNotificationToTranslator($job);
+			
             return response(['success' => 'SMS sent']);
-        } catch (\Exception $e) {
-            return response(['success' => $e->getMessage()]);
+        }
+        catch(Exception $e) {
+	        info("Exception occurred: ", [$e->getMessage()]);
+	        return response('Some error occurred!');
         }
     }
 
